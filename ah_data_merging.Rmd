@@ -1,0 +1,488 @@
+---
+title: "Add Health Data Merging"
+author: "Tracy Lam-Hine"
+date: "12/28/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load packages
+```{r}
+library(tidyverse)
+library(knitr)
+library(foreign)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(table1)
+library(tableone)
+library(visdat)
+library(naniar)
+library(ggplot2)
+library(lme4)
+library(survey)
+```
+
+## Set working directory
+```{r eval = F}
+setwd("C:/Users/lamhine/Desktop")
+```
+
+
+## COMBINE W1, W3, and W4 FILES INTO AH FILE WITH LEFT JOINS 
+```{r}     
+# left join wave 1 and wave 3 files into ah
+ah <- left_join(w1, w3, by = "AID")
+
+# left join ah and w4 files
+ah <- left_join(ah, w4, by = "AID")
+
+# left join ah and w4 weight file
+ah <- left_join(ah, w4wts, by = "AID") %>% 
+   select(!GSWGT4) %>% 
+   select(!GSWGT134)
+```       
+
+## Combine w1 and w3 race variables and create self-multi
+```{r eval = F}
+ah <- ah %>% 
+   mutate(
+      single_race_c = NA_real_,
+      single_race_c = case_when(
+         as.double(single_race_w3) == 6       ~ 7,
+         as.double(single_race_w1) == 6 & 
+            is.na(single_race_w3)             ~ 6,
+         is.na(single_race_w3)                ~ as.double(single_race_w1),
+         is.na(single_race_w1)                ~ as.double(single_race_w3),
+         TRUE                                 ~ as.double(single_race_w3)
+      ),
+      single_race_c = factor(
+         single_race_c,
+         levels = c(1:7),
+         labels = c(
+            "Hispanic/Latine",
+            "White alone",
+            "Black alone",
+            "AI/NA alone",
+            "Asian alone",
+            "Other alone",
+            "Multiracial"
+            )
+         ),
+      self_multi_c = NA_real_,
+      self_multi_c = case_when(
+         as.double(single_race_c) == 7 ~ 1,
+         TRUE                          ~ 0
+         ),
+      self_multi_c = factor(
+         self_multi_c,
+         levels = c(0,1),
+         labels = c(
+            "Not multiracial",
+            "Multiracial"
+            ) 
+         )
+      )
+
+ah <- ah %>% 
+   select(!single_race_w1) %>% 
+   select(!single_race_w3)
+```
+
+## Combine wave 1 and wave 3 races to create detailed multiracial variable
+```{r}
+ah <- ah %>% 
+   mutate(
+      multi_c = NA_character_,
+      multi_c = case_when(
+         is.na(multi_w3)                                          ~ multi_w1,
+         str_count(multi_w1, "1") >  str_count(multi_w3, "1")     ~ multi_w1,
+         str_count(multi_w1, "1") <  str_count(multi_w3, "1")     ~ multi_w3,
+         str_count(multi_w1, "1") == str_count(multi_w3, "1") &
+            str_sub(multi_w1, 1, 4) == multi_w3                   ~ multi_w1,
+         TRUE                                                     ~ multi_w3
+      )
+   )
+
+ah <- ah %>% 
+   mutate(race_det = case_when(
+      substr(multi_c, 5, 5) == 0     ~ str_sub(multi_c, 1, 4),
+      str_detect(multi_c, "1")       ~ multi_c,
+      TRUE                     ~ NA_character_
+      )
+   )
+
+ah <- ah %>%
+   separate(race_det,
+            into = paste("race", 0:5, sep = ""),
+            sep = "",
+            convert = TRUE,
+            remove = FALSE
+            ) %>% 
+   mutate(race5 = replace_na(race5, 0)) %>%
+   select(!c(race0))
+
+ah <- ah %>%
+   rename("White" = race1,
+          "Black" = race2,
+          "AI/NA" = race3,
+          "Asian" = race4,
+          "Other" = race5)
+
+
+ah <- ah %>% 
+   mutate(race_det = case_when(
+      race_det == "1000"  ~ "White alone", 
+      race_det == "0100"  ~ "Black alone",
+      race_det == "0010"  ~ "AI/NA alone",
+      race_det == "0001"  ~ "Asian alone",
+      race_det == "00001" ~ "Other alone",
+      race_det == "1810"  ~ "White and AI/NA",
+      race_det == "1111"  ~ "White, Black, AI/NA, and Asian",
+      race_det == "11101" ~ "White, Black, AI/NA, and other",
+      race_det == "1110"  ~ "White, Black, and AI/NA",
+      race_det == "1101"  ~ "White, Black, and Asian", 
+      race_det == "11001" ~ "White, Black, and other", 
+      race_det == "1100"  ~ "White and Black",
+      race_det == "10111" ~ "White, AI/NA, Asian, and other",
+      race_det == "1011"  ~ "White, AI/NA, and Asian", 
+      race_det == "10101" ~ "White, AI/NA, and other",
+      race_det == "1010"  ~ "White and AI/NA",
+      race_det == "10011" ~ "White, Asian, and other",
+      race_det == "1001"  ~ "White and Asian",
+      race_det == "10001" ~ "White and other",
+      race_det == "0111"  ~ "Black, AI/NA, and Asian",
+      race_det == "01101" ~ "Black, AI/NA, and other",
+      race_det == "0110"  ~ "Black and AI/NA",
+      race_det == "0101"  ~ "Black and Asian",
+      race_det == "01001" ~ "Black and other",
+      race_det == "00111" ~ "AI/NA, Asian, and other",
+      race_det == "0011"  ~ "AI/NA and Asian",
+      race_det == "00101" ~ "AI/NA and other",
+      race_det == "00011" ~ "Asian and other",
+      TRUE                ~ race_det
+      )
+   )
+
+table(ah$race_det, exclude = NULL)
+
+```
+
+
+## Create multiracial variable that separates out AI/NA ancestry
+```{r}
+ah <- ah %>% 
+   mutate(
+      multi_ai = NA_character_,
+      multi_ai = case_when(
+         str_detect(race_det, "alone") ~ race_det,
+         str_detect(race_det, "AI/NA") ~ "Multiracial AI/NA", 
+         TRUE                          ~ "Multiracial not AI/NA"),
+      multi_ai = fct_relevel(
+         multi_ai,
+         "White alone",
+         "Black alone",
+         "Asian alone",
+         "AI/NA alone",
+         "Other alone",
+         "Multiracial AI/NA",
+         "Multiracial not AI/NA"
+      )
+   )
+```
+
+## Create discrete racial group categories 
+```{r}
+ah <- ah %>% 
+   mutate(
+      multi_1 = fct_collapse(
+         multi_ai,
+         "Multiracial" = c("Multiracial AI/NA", "Multiracial not AI/NA")
+      )
+   )
+```
+
+## Create binary multi/mono variable 
+```{r}
+ah <- ah %>% 
+   mutate(
+      multi = 
+         fct_collapse(
+            multi_1,
+            "Monoracial" = c("White alone",
+                             "Black alone",
+                             "Asian alone",
+                             "AI/NA alone",
+                             "Other alone")
+            )
+      )
+      
+```
+
+## Create summary ACEs score
+```{r}
+# example code drawn from https://stackoverflow.com/questions/45947787/create-new-variables-with-mutate-at-while-keeping-the-original-ones
+
+# create new numeric scores for all ACE variables and subtract 1
+ah <- ah %>% 
+  mutate(
+     across(
+        starts_with("ace_"),
+        .fns = list(
+           num = ~as.numeric(.)
+        )
+     ), 
+     across(
+        ends_with("_num"),
+        .fns = ~.x - 1
+     )
+  )
+
+# sum all numeric ACE component variables into a summary score (using Otero method)
+ah <- ah %>% 
+   mutate(
+     ace_otero = rowSums(
+        select(., ends_with("_num")),
+        na.rm = T
+     )
+   )
+
+# sum all numeric ACE component variables into a summary score
+# drop divorce and mother treated violently since those have msmt issues
+ah <- ah %>% 
+   mutate(
+     ace_sum = rowSums(
+        select(.,
+               c("ace_emo_neg_w1_num",
+                 "ace_sub_abu_w1_num", 
+                 "ace_mnt_ill_w1_num", 
+                 "ace_phy_abu_w3_num",
+                 "ace_sex_abu_w3_num",
+                 "ace_phy_neg_w3_num",
+                 "ace_emo_abu_w4_num",
+                 "ace_par_inc_w4_num")),
+        na.rm = T
+     )
+   )
+
+# drop all numeric ACE component variables
+ah <- ah %>% 
+     select(., -ends_with("_num")
+            )
+```
+
+## Create binary depression variable
+```{r}
+ah <- ah %>% 
+   mutate(
+      dep_bin = NA_real_,
+      dep_bin = case_when(
+         H3ID26F == 1 | H4ID5H == 1 ~ 1,
+         TRUE ~ 0),
+      dep_bin = factor(
+         dep_bin,
+         levels = c(0,1),
+         labels = c("No depressive symptoms",
+                    "Depressive symptoms"
+                    )
+      )
+   )
+
+ah <- ah %>% 
+   select(!c(H3ID26F, H4ID5H))
+```
+
+## Specify complex survey design
+```{r}
+# remove all observations without cluster ID or wave 4 weight ("complete cases")
+ah_cc <- ah %>%
+   filter(
+      !is.na(PSUSCID) & 
+         !is.na(GSWGT4_2)
+   )
+
+# specify complex survey design using ah_cc
+ah_cc.dsn <- svydesign(
+   id = ~PSUSCID,
+   weights = ~GSWGT4_2,
+   strata = ~REGION,
+   data = ah_cc,
+   nest = F
+)
+
+summary(ah_cc.dsn)
+
+
+# subset to remove hispanic/latine individuals
+ah_nl.dsn <- subset(ah_cc.dsn, H1GI4 !=  1 | H3OD2 != 1)
+
+# subset to remove pregnant individuals
+ah_np.dsn <- subset(ah_nl.dsn, H4TR7 != 1)
+
+# subset to remove other race individuals
+ah_no.dsn <- subset(ah_np.dsn, multi_1 != "Other")
+
+# also create unweighted dfs mirroring subset for descriptives
+ah_cc_nl <- ah_cc %>% filter(H1GI4 != 1 | H3OD2 != 1)
+ah_cc_np <- ah_cc_nl %>% filter(H4TR7 != 1)
+ah_cc_no <- ah_cc_np %>% filter(multi_1 != "Other")
+
+```
+## Create unweighted Table 1
+```{r}
+# label all variables 
+table1::label(ah_cc_nl$BIO_SEX4) <- "Sex"
+table1::label(ah_cc_nl$age_w4) <- "Age at Wave IV interview"
+table1::label(ah_cc_nl$multi) <- "Multiracial/monoracial"
+table1::label(ah_cc_nl$multi_ai) <- "Race, Multiracial by American Indian Ancestry"
+table1::label(ah_cc_nl$multi_1) <- "Race"
+table1::label(ah_cc_nl$mis_w1) <- "Racially misclassified by interviewer"
+table1::label(ah_cc_nl$max_par_edu_w1) <- "Highest parental education attainment"
+table1::label(ah_cc_nl$fam_inc_w1) <- "Per capita family income"
+table1::label(ah_cc_nl$nei_dis_w1) <- "Neighborhood disadvantage"
+table1::label(ah_cc_nl$par_sup_w1) <- "Parental support"
+table1::label(ah_cc_nl$ace_div_w1) <- "ACE: Parental separation or divorce"
+table1::label(ah_cc_nl$div_fut_w1) <- "Future parent divorce possible"
+table1::label(ah_cc_nl$ace_emo_neg_w1) <- "ACE: Emotional neglect"
+table1::label(ah_cc_nl$ace_mom_vio_w1) <- "ACE: Mother treated violently"
+table1::label(ah_cc_nl$ace_sub_abu_w1) <- "ACE: Household substance abuse"
+table1::label(ah_cc_nl$ace_mnt_ill_w1) <- "ACE: Household mental illness"
+table1::label(ah_cc_nl$ace_sex_abu_w3) <- "ACE: Sexual abuse"
+table1::label(ah_cc_nl$ace_phy_abu_w3) <- "ACE: Physical abuse"
+table1::label(ah_cc_nl$ace_phy_neg_w3) <- "ACE: Physical neglect"
+table1::label(ah_cc_nl$ace_emo_abu_w4) <- "ACE: Emotional abuse"
+table1::label(ah_cc_nl$ace_par_inc_w4) <- "ACE: Parental incarceration"
+table1::label(ah_cc_nl$ace_sum) <- "ACEs Summary Score"
+table1::label(ah_cc_nl$exp_dis_w4) <- "Experienced racial discrimination"
+table1::label(ah_cc_nl$sbp_w4) <- "Systolic blood pressure"
+table1::label(ah_cc_nl$dbp_w4) <- "Diastolic blood pressure"
+table1::label(ah_cc_nl$ht_meds_w4) <- "Anti-hypertension medications"
+table1::label(ah_cc_nl$dx_ht_w4) <- "Diagnosed hypertension"
+table1::label(ah_cc_nl$waist_w4) <- "Waist circumference"
+table1::label(ah_cc_nl$tg_dec_w4) <- "Triglyceride deciles"
+table1::label(ah_cc_nl$C_MED2) <- "Anti-hyperlipid medications"
+table1::label(ah_cc_nl$hdl_dec_w4) <- "HDL cholesterol deciles"
+table1::label(ah_cc_nl$dx_hc_w4) <- "Diagnosed high cholesterol"
+table1::label(ah_cc_nl$C_MED) <- "Anti-diabetes medications"
+table1::label(ah_cc_nl$hba1c_pct_w4) <- "Glycated hemoglobin levels"
+table1::label(ah_cc_nl$dx_hbs_w4) <- "Diagnosed diabetes"
+table1::label(ah_cc_nl$mets_bp) <- "Hypertension (binary)"
+table1::label(ah_cc_nl$mets_w4) <- "Metabolic syndrome"
+table1::label(ah_cc_nl$dep_bin) <- "Depression (binary)"
+table1::label(ah_cc_nl$dep_cts) <- "Depression (continuous)"
+table1::label(ah_cc_nl$ast_w4) <- "Diagnosed asthma"
+table1::label(ah_cc_nl$anx_w4) <- "Diagnosed anxiety"
+table1::label(ah_cc_nl$pdu_w4) <- "Problematic drug use"
+table1::label(ah_cc_nl$sui_w4) <- "Suicidal ideation"
+units(ah_cc_nl$fam_inc_w1) <- "in 1,000 USD"
+units(ah_cc_nl$nei_dis_w1) <- "scale from 0 to 1"
+units(ah_cc_nl$par_sup_w1) <- "scale from 1 to 5"
+units(ah_cc_nl$sbp_w4) <- "mmHg"
+units(ah_cc_nl$dbp_w4) <- "mmHg"
+units(ah_cc_nl$waist_w4) <- "cm"
+units(ah_cc_nl$hba1c_pct_w4) <- "%"
+
+# create paper 1 table 1
+p1_tab1 <- table1(~ BIO_SEX4 +
+          age_w4 +
+          ace_div_w1 +
+          #div_fut_w1 +
+          ace_emo_neg_w1 +
+          ace_mom_vio_w1 +
+          ace_sub_abu_w1 +
+          ace_mnt_ill_w1 +
+          ace_sex_abu_w3 +
+          ace_phy_abu_w3 + 
+          ace_phy_neg_w3 +
+          ace_emo_abu_w4 + 
+          ace_par_inc_w4 + 
+          ace_sum |
+          multi_ai, 
+       data = ah_cc_nl,
+       output = "html"
+)
+
+# create paper 2 table 1
+p2_tab1 <- table1(~ BIO_SEX4 +
+                     age_w4 +
+                     multi_1 +
+                     mis_w1 +
+                     max_par_edu_w1 +
+                     fam_inc_w1 +
+                     par_sup_w1 +
+                     exp_dis_w4 +           
+                     nei_dis_w1 +
+                     #ace_div_w1 +
+                     #div_fut_w1 +
+                     #ace_emo_neg_w1 +
+                     #ace_mom_vio_w1 +
+                     #ace_sub_abu_w1 +
+                     #ace_mnt_ill_w1 +
+                     #ace_sex_abu_w3 +
+                     #ace_phy_abu_w3 + 
+                     #ace_phy_neg_w3 +
+                     #ace_emo_abu_w4 + 
+                     #ace_par_inc_w4 + 
+                     ace_sum +
+                     #sbp_w4 + 
+                     #dbp_w4 +
+                     #ht_meds_w4 +
+                     #dx_ht_w4 + 
+                     #waist_w4 +
+                     #tg_dec_w4 + 
+                     #C_MED2 + 
+                     #hdl_dec_w4 +
+                     #dx_hc_w4 + 
+                     #C_MED + 
+                     #hba1c_pct_w4 +
+                     #dx_hbs_w4 + 
+                     mets_bp +
+                     mets_w4 +
+                     ast_w4 +
+                     anx_w4 + 
+                     dep_bin +
+                     dep_cts + 
+                     pdu_w4 | 
+                     multi, 
+       data = ah_cc_nl,
+       output = "html"
+       )
+```
+
+## Create weighted table 1
+```{r eval = F}
+# create variable lists for tables
+wt_tbl_list_full <- c("BIO_SEX4", "age_w4", "single_race_c", "mis_w1", "max_par_edu_w1", 
+   "fam_inc_w1", "par_sup_w1", "exp_dis_w4", "nei_dis_w1", "ace_div_w1", 
+   "div_fut_w1", "ace_emo_neg_w1", "ace_mom_vio_w1", "ace_sub_abu_w1", 
+   "ace_mnt_ill_w1", "ace_sex_abu_w3", "ace_phy_abu_w3", "ace_phy_neg_w3", 
+   "ace_emo_abu_w4", "ace_par_inc_w4", "ace_sum", "sbp_w4", "dbp_w4", "ht_meds_w4", 
+   "dx_ht_w4", "waist_w4", "tg_dec_w4", "C_MED2", "hdl_dec_w4", "dx_hc_w4", 
+   "C_MED", "hba1c_pct_w4", "dx_hbs_w4", "mets_w4")
+
+wt_tbl_list_lm <- c("BIO_SEX4", "age_w4", "single_race_c", "mis_w1", "max_par_edu_w1", 
+   "fam_inc_w1", "par_sup_w1", "exp_dis_w4", "nei_dis_w1", "ace_sum", "mets_w4")
+
+# create a full table 1 with all component variables included
+wt_tbl_1_full <- svyCreateTableOne(
+   vars = wt_tbl_list_full,
+   strata = "self_multi_c", 
+   data = ah_no.dsn)
+
+summary(wt_tbl_1_full)
+
+# create a shorter table 1 with only variables passed to an lm included
+wt_tbl_1_lm <- svyCreateTableOne(
+   vars = wt_tbl_list_lm,
+   strata = "self_multi_c", 
+   data = ah_no.dsn)
+
+summary(tbl_1_lm)
+```
+
+
+

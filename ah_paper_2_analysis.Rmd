@@ -1,0 +1,632 @@
+---
+title: "Paper 2 Data Analysis"
+author: "Tracy Lam-Hine"
+date: "2/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+```{r}
+library(foreign)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(table1)
+library(tableone)
+library(visdat)
+library(naniar)
+library(ggplot2)
+library(UpSetR)
+library(lme4)
+library(jtools)
+library(survey)
+library(summarytools)
+library(huxtable)
+```
+
+
+## Basic tables
+```{r eval = F}
+## METS TABLES
+# metabolic syndrome prevalence by racial group
+as_tibble(svyby(~mets_w4, ~multi_1, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100)) %>% 
+   rename_with(~str_remove(., 'mets_w4'))
+
+# metabolic syndrome prevalence by multiracial group
+as_tibble(svyby(~mets_w4, ~multi_ai, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100)) %>% 
+   rename_with(~str_remove(., 'mets_w4'))
+
+# metabolic syndrome prevalence by age
+as_tibble(svyby(~mets_w4, ~age_w4, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100)) %>% 
+   rename_with(~str_remove(., 'mets_w4'))
+
+## DEPRESSION TABLES
+
+# depression prevalence by age
+as_tibble(svyby(~dep_bin, ~age_w4, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+# depression prevalence by sex
+as_tibble(svyby(~dep_bin, ~BIO_SEX4, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100)) %>% 
+   rename_with(~str_remove(., 'mets_w4'))
+
+
+## ANXIETY TABLES
+# anxiety prevalence by multiracial group
+as_tibble(svyby(~anx_w4, ~multi_ai, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+# anxiety prevalence by age
+as_tibble(svyby(~anx_w4, ~age_w4, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+# anxiety prevalence by sex
+as_tibble(svyby(~anx_w4, ~BIO_SEX4, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+# anxiety prevalence by depression status (binary)
+as_tibble(svyby(~anx_w4, ~dep_bin, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+# mean depression (cts) by depression status (binary)
+as_tibble(svyby(~dep_bin, ~dep_cts, ah_no.dsn, svymean, na.rm = T))
+
+## ACES TABLES
+as_tibble(svyby(~dep_bin, ~ace_otero, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+as_tibble(svyby(~sui_w4, ~ace_otero, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+as_tibble(svyby(~anx_w4, ~ace_otero, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+as_tibble(svyby(~multi_1, ~age_w4, ah_no.dsn, svymean, na.rm = T)) %>% 
+   mutate_at(vars(2:4),
+            .funs = funs(. * 100))
+
+ggplot(data = ah_cc,
+       aes(x= age_w4)) +
+       geom_histogram() + 
+   facet_wrap(~multi_1)
+
+```
+
+## Run crude, adjusted, and interaction model regressing MetS on ACEs
+```{r}
+cru.mets <- svyglm(
+   mets_w4 ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.mets <- svyglm(
+   mets_w4 ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.mets <- svyglm(
+   mets_w4 ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.mets, exp = T, confint = T)
+summ(adj.mets, exp = T, confint = T)
+summ(ixn.mets, exp = T, confint = T)
+
+res.mets <- export_summs(summ(cru.mets, exp = T, confint = T), 
+                         summ(adj.mets, exp = T, confint = T), 
+                         summ(ixn.mets, exp = T, confint = T),
+                         error_format = "[{conf.low}, {conf.high}]",
+                         error_pos = "right", 
+                         model.names = c("MetS: Crude","MetS: Adjusted","MetS: Interaction"),
+                         coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                   )
+                         )
+
+```
+## Run crude, adjusted, and interaction model regressing hypertension (binary) on ACEs
+```{r}
+cru.htn <- svyglm(
+   mets_bp ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.htn <- svyglm(
+   mets_bp ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.htn <- svyglm(
+   mets_bp ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.htn, exp = T, confint = T)
+summ(adj.htn, exp = T, confint = T)
+summ(ixn.htn, exp = T, confint = T)
+
+res.htn <- export_summs(summ(cru.htn, exp = T, confint = T), 
+                         summ(adj.htn, exp = T, confint = T), 
+                         summ(ixn.htn, exp = T, confint = T),
+                         error_format = "[{conf.low}, {conf.high}]",
+                         error_pos = "right", 
+                         model.names = c("Hypertension (binary): Crude","Hypertension (binary): Adjusted","Hypertension (binary): Interaction"),
+                         coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                   )
+                         )
+```
+
+## Run crude, adjusted, and interaction model regressing depression (binary) on ACEs
+```{r}
+cru.depb <- svyglm(
+   dep_bin ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.depb <- svyglm(
+   dep_bin ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.depb <- svyglm(
+   dep_bin ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.depb, exp = T, confint = T)
+summ(adj.depb, exp = T, confint = T)
+summ(ixn.depb, exp = T, confint = T)
+
+res.depb <- export_summs(summ(cru.depb, exp = T, confint = T), 
+                         summ(adj.depb, exp = T, confint = T), 
+                         summ(ixn.depb, exp = T, confint = T),
+                         error_format = "[{conf.low}, {conf.high}]",
+                         error_pos = "right", 
+                         model.names = c("Depression (binary): Crude","Depression (binary): Adjusted","Depression (binary): Interaction"),
+                         coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                   )
+                         )
+
+```
+
+
+## Run crude, adjusted, and interaction model regressing depression (continuous) on ACEs
+```{r}
+cru.depc <- svyglm(
+   dep_cts ~ ace_otero,
+   family = gaussian(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.depc <- svyglm(
+   dep_cts ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = gaussian(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.depc <- svyglm(
+   dep_cts ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = gaussian(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.depc, exp = T, confint = T)
+summ(adj.depc, exp = T, confint = T)
+summ(ixn.depc, exp = T, confint = T)
+
+res.depc <- export_summs(summ(cru.depc, exp = T, confint = T), 
+                         summ(adj.depc, exp = T, confint = T), 
+                         summ(ixn.depc, exp = T, confint = T),
+                         error_format = "[{conf.low}, {conf.high}]",
+                         error_pos = "right", 
+                         model.names = c("Depression (continuous): Crude","Depression (continuous): Adjusted","Depression (continuous): Interaction"),
+                         coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                   )
+                         )
+
+```
+
+## Run crude, adjusted, and interaction model regressing diagnosed asthma on ACEs
+```{r}
+cru.ast <- svyglm(
+   ast_w4 ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.ast <- svyglm(
+   ast_w4 ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.ast <- svyglm(
+   ast_w4 ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.ast, exp = T, confint = T)
+summ(adj.ast, exp = T, confint = T)
+summ(ixn.ast, exp = T, confint = T)
+
+res.ast <- export_summs(summ(cru.ast, exp = T, confint = T),
+                        summ(adj.ast, exp = T, confint = T), 
+                        summ(ixn.ast, exp = T, confint = T),
+                        error_format = "[{conf.low}, {conf.high}]",
+                        error_pos = "right", 
+                        model.names = c("Asthma: Crude","Asthma: Adjusted","Asthma: Interaction"),
+                        coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                  )
+                        )
+```
+
+## Run crude, adjusted, and interaction model regressing diagnosed anxiety on ACEs
+```{r}
+cru.anx <- svyglm(
+   anx_w4 ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.anx <- svyglm(
+   anx_w4 ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.anx <- svyglm(
+   anx_w4 ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.anx, exp = T, confint = T)
+summ(adj.anx, exp = T, confint = T)
+summ(ixn.anx, exp = T, confint = T)
+
+res.anx <- export_summs(summ(cru.anx, exp = T, confint = T),
+                        summ(adj.anx, exp = T, confint = T), 
+                        summ(ixn.anx, exp = T, confint = T),
+                        error_format = "[{conf.low}, {conf.high}]",
+                        error_pos = "right", 
+                        model.names = c("Anxiety: Crude","Anxiety: Adjusted","Anxiety: Interaction"),
+                        coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                  )
+                        )
+```
+
+## Run crude, adjusted, and interaction model regressing suicidal ideation on ACEs
+```{r}
+cru.sui <- svyglm(
+   sui_w4 ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.sui <- svyglm(
+   sui_w4 ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.sui <- svyglm(
+   sui_w4 ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.sui, exp = T, confint = T)
+summ(adj.sui, exp = T, confint = T)
+summ(ixn.sui, exp = T, confint = T)
+
+res.sui <- export_summs(summ(cru.sui, exp = T, confint = T),
+                        summ(adj.sui, exp = T, confint = T), 
+                        summ(ixn.sui, exp = T, confint = T),
+                        error_format = "[{conf.low}, {conf.high}]",
+                        error_pos = "right", 
+                        model.names = c("Suicidal ideation: Crude","Suicidal ideation: Adjusted","Suicidal ideation: Interaction"),
+                        coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                  )
+                        )
+```
+
+
+## Run crude, adjusted, and interaction model regressing problematic drug use on ACEs
+```{r}
+cru.pdu <- svyglm(
+   pdu_w4 ~ ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+adj.pdu <- svyglm(
+   pdu_w4 ~ BIO_SEX4 + age_w4 + multi_1 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + ace_otero,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+ixn.pdu <- svyglm(
+   pdu_w4 ~ BIO_SEX4 + age_w4 + mis_w1 + max_par_edu_w1 + 
+      fam_inc_w1 + par_sup_w1 + exp_dis_w4 + nei_dis_w1 + 
+      ace_otero * multi_1,
+   family = quasibinomial(),
+   data = ah_cc,
+   design = ah_no.dsn
+   )
+
+summ(cru.pdu, exp = T, confint = T)
+summ(adj.pdu, exp = T, confint = T)
+summ(ixn.pdu, exp = T, confint = T)
+
+res.pdu <- export_summs(summ(cru.pdu, exp = T, confint = T),
+                        summ(adj.pdu, exp = T, confint = T), 
+                        summ(ixn.pdu, exp = T, confint = T),
+                        error_format = "[{conf.low}, {conf.high}]",
+                        error_pos = "right", 
+                        model.names = c("Problematic drug use: Crude","Problematic drug use: Adjusted","Problematic drug use: Interaction"),
+                        coefs = c("ACEs summary score" = "ace_otero",
+                                   "Female" = "BIO_SEX4Female",
+                                   "Age at wave 4" = "age_w4",
+                                   "Black alone" = "multi_1Black alone",
+                                   "AI/NA alone" = "multi_1AI/NA alone",
+                                   "Asian alone" = "multi_1Asian alone",
+                                   #"Other alone" = "multi_1Other alone",
+                                   "Multiracial" = "multi_1Multiracial",
+                                   "Racially misclassified" = "mis_w1Misclassified",
+                                   "Parents graduated high school" = "max_par_edu_w1High school diploma",
+                                   "Parents completed some college" = "max_par_edu_w1Some college",
+                                   "Parents graduated college" = "max_par_edu_w1College graduate or greater",
+                                   "Normalized family income" = "fam_inc_w1",
+                                   "Parental support score" = "par_sup_w1",
+                                   "Experienced racism" = "exp_dis_w4Experienced racial discrimination",
+                                   "Neighborhood disadvantage score" = "nei_dis_w1",
+                                   "ACE score * Black alone" = "ace_otero:multi_1Black alone",
+                                   "ACE score * Asian alone" = "ace_otero:multi_1Asian alone",
+                                   "ACE score * AI/NA alone" = "ace_otero:multi_1AI/NA alone",
+                                   #"ACE score * Other alone" = "ace_otero:multi_1Other alone",
+                                   "ACE score * Multiracial" = "ace_otero:multi_1Multiracial"
+                                  )
+                        )
+```
+
+
+```{r}
+plot_summs(cru.mets, adj.mets, ixn.mets, 
+           cru.depb, adj.depb, ixn.depb,
+           cru.depc, adj.depc, ixn.depc,
+           coefs = setNames(c("ace_otero:multi_1Multiracial","ace_otero"),
+                            c("ACEs * Multiracial", "ACEs summary score")),
+           model.names = c("MetS crude", "MetS adjusted", "MetS interaction",
+                           "Depression (bin) crude", "Depression (bin) adjusted", "Depression (bin) interaction",
+                           "Depression (cts) crude", "Depression (cts) adjusted", "Depression (cts) interaction"),
+           #legend.title	= "MetS models",
+           colors = c("blue", "blue", "blue",
+                      "orange", "orange", "orange",
+                      "orange2", "orange2", "orange2"),
+           exp = TRUE,
+           scale = TRUE,
+           plot.distributions = TRUE)
+
+
+```
+
+
+
+
+

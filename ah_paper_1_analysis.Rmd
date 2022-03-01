@@ -1,0 +1,241 @@
+---
+title: "Paper 1 Data Analysis"
+author: "Tracy Lam-Hine"
+date: "12/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load packages
+```{r}
+library(foreign)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(table1)
+library(tableone)
+library(visdat)
+library(naniar)
+library(ggplot2)
+library(UpSetR)
+library(lme4)
+library(jtools)
+library(survey)
+library(summarytools)
+```
+
+## Get detail of mother/father figure race for "Other"
+```{r}
+other_det <- ah_cc_nl %>% 
+   filter(multi_ai == "Other alone") %>% 
+   group_by(H1RM3, H1RF3) %>% 
+   summarize(n = n()) %>% 
+   arrange(desc(n))
+```
+
+## Visualize multiracial overlap
+```{r}
+upset1 <- ah_cc_nl %>% 
+   upset(sets = c("Other", 
+                  "AI/NA", 
+                  "Asian", 
+                  "Black", 
+                  "White"),
+      order.by="freq", 
+      keep.order = T, 
+      text.scale = c(1.5, 1.5, 1.5, 1.5, 1.5, 1.5)
+      )
+
+upset2 <- ah_cc_nl %>% 
+   filter(!str_detect(multi_ai, "alone")) %>% 
+   upset(sets = c("Other", 
+                  "AI/NA", 
+                  "Asian", 
+                  "Black", 
+                  "White"),
+         order.by="freq", 
+         keep.order = T, 
+         text.scale = c(1.5, 1.5, 1.5, 1.5, 1.5, 1.5)
+      )
+```
+
+## Plot mean ACE score by racial group separating Multiracial into those with 
+## and without AI/NA ancestry
+```{r}
+# mean ACE score by multiracial group
+ace_multi <- as_tibble(
+   svyby(~ace_otero, ~multi_ai, ah_nl.dsn, svymean, na.rm = T)) %>% 
+   arrange(desc(ace_otero))
+
+# add UB and LB
+ace_multi <- ace_multi %>% 
+   mutate(lb = ace_otero - 1.96 * se,
+          ub = ace_otero + 1.96 * se)
+
+# break long lines
+levels(ace_multi$multi_ai) <- sub("? ", "\n", levels(ace_multi$multi_ai))
+
+plot_ace_multi <- ggplot(ace_multi, aes(multi_ai, ace_otero)) +        # ggplot2 plot with confidence intervals
+   geom_point(aes(x = reorder(multi_ai, -ace_otero), color = multi_ai)) +
+   geom_errorbar(aes(ymin = `lb`, ymax = `ub`, color = multi_ai), width=0.05) + 
+   ggtitle("Figure 3: Mean ACE score by racial group, separating Multiracial \n participants into those with and without AI/AN ancestry ") +
+   theme(axis.line=element_line(),
+         legend.position = "none",
+         axis.title.x = element_blank(),
+         axis.title.y = element_blank())
+  
+plot_ace_multi
+```
+
+## Check if SEs change when subsetting further
+```{r}
+# subset again to only AI/AN and multiracial individuals
+ah_aim.dsn <- subset(ah_nl.dsn, multi_ai %in% c("AI/NA alone", 
+                                                "Multiracial AI/NA",
+                                                "Multiracial not AI/NA"))
+
+aim_comp_tab <- as_tibble(
+   svyby(~ace_otero, ~multi_ai, ah_aim.dsn, svymean, na.rm = T)  %>% 
+      rename("Mean" = 2,
+             "SE" = 3) %>% 
+      mutate(component = "Summary score (mean)") %>% 
+   mutate(lb = Mean - 1.96 * SE,
+          ub = Mean + 1.96 * SE)
+)
+```
+
+## unadjusted poisson regregssion testing ace_otero ~ multi_ai
+```{r}
+p1m1 <- svyglm(ace_otero ~ factor(multi_ai), design = ah_nl.dsn, family = quasipoisson())
+summ(p1m1, exp = T, confint = T)
+```
+
+## Plot prevalence of ACE component scores by Multiracial groups
+```{r}
+# create table of mean ACE component score by multiracial group
+ace_comp_tab <- rbind(
+   as_tibble(svyby(~ace_otero, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      rename("Mean" = 2,
+             "SE" = 3) %>% 
+      mutate(component = "Summary score (mean)"), 
+   as_tibble(svyby(~ace_emo_abu_w4, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Emotional abuse (%)"),  
+   as_tibble(svyby(~ace_phy_abu_w3, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Physical abuse (%)"),  
+   as_tibble(svyby(~ace_sex_abu_w3, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Sexual abuse (%)"),
+   as_tibble(svyby(~ace_emo_neg_w1, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Emotional neglect (%)"),
+   as_tibble(svyby(~ace_phy_neg_w3, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Physical neglect (%)"),
+   as_tibble(svyby(~ace_div_w1, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Parental separation or divorce (%)"),
+
+   as_tibble(svyby(~ace_mom_vio_w1, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Mother treated violently (%)"),
+   as_tibble(svyby(~ace_sub_abu_w1, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Household substance abuse (%)"),
+   as_tibble(svyby(~ace_mnt_ill_w1, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Household mental illness (%)"),
+   as_tibble(svyby(~ace_par_inc_w4, ~multi_ai, ah_nl.dsn, svymean, na.rm = T))  %>% 
+      mutate_at(vars(2:4),
+                .funs = funs(. * 100)) %>% 
+      rename("Mean" = 2,
+             "SE" = 4) %>% 
+      select(!c(3,5)) %>% 
+      mutate(component = "Parental incarceration (%)") 
+) 
+
+# reorder facets into original ACE survey component order
+ace_comp_tab$facet <- factor(ace_comp_tab$component,
+                             levels = c("Summary score (mean)", 
+                                        "Emotional abuse (%)", 
+                                        "Physical abuse (%)", 
+                                        "Sexual abuse (%)",
+                                        "Emotional neglect (%)",
+                                        "Physical neglect (%)",
+                                        "Parental separation or divorce (%)",
+                                        "Mother treated violently (%)",
+                                        "Household substance abuse (%)",
+                                        "Household mental illness (%)",
+                                        "Parental incarceration (%)")
+                             ) 
+
+
+# break long lines
+levels(ace_comp_tab$multi_ai) <- sub("? ", "\n", levels(ace_comp_tab$multi_ai))
+
+# add 95% CI
+ace_comp_tab <- ace_comp_tab %>% 
+   mutate(lb = Mean - 1.96 * SE,
+          ub = Mean + 1.96 * SE)
+
+# ggplot2 plot with confidence intervals
+xlabs <- gsub('not ', 'not \n', c("O", "AI/NA", "M AI/NA", "M not AI/NA", "B", "W", "A"))
+plot_ace_comp <- ggplot(ace_comp_tab, aes(multi_ai, Mean)) +        
+   geom_point(aes(x = reorder(multi_ai, -Mean), color = multi_ai)) +
+   geom_errorbar(aes(ymin = `lb`, ymax = `ub`, color = multi_ai), width=0.05) +
+   facet_wrap(vars(facet), scales = "free") + 
+   scale_x_discrete(labels= xlabs) +
+   ggtitle("Figure 4: ACE component prevalence by racial group, separating Multiracial participants into those with and without AI/AN ancestry ") +
+   theme(axis.line=element_line(),
+         legend.position = "none",
+         axis.title.x = element_blank(),
+         axis.title.y = element_blank())
+  
+plot_ace_comp
+```
+
+
+
+

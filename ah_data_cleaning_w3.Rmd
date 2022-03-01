@@ -1,0 +1,220 @@
+---
+title: "Add Health Wave 3 Data Cleaning"
+author: "Tracy Lam-Hine"
+date: "12/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load packages
+```{r eval = F}
+   library(foreign)
+   library(dplyr)
+   library(tidyr)
+   library(stringr)
+   library(table1)
+   library(tableone)
+   library(visdat)
+   library(naniar)
+   library(ggplot2)
+   library(lme4)
+```
+
+## Set working directory
+```{r eval = F}
+setwd("C:/Users/lamhine/Desktop")
+```
+
+## Read in data files
+```{r eval = F}
+wave3 <- read.xport("C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave III/Wave III In Home Interview Data/wave3/wave3.xpt")
+```
+
+# WAVE 3 DATA
+```{r}
+# pull necessary variables from wave 3 data
+w3 <- wave3 %>% 
+  select(AID, 
+         H3OD2, H3OD4A, H3OD4B, H3OD4C, H3OD4D, H3OD6,  # race variables
+         H3MA3,                                         # physical abuse
+         H3MA4,                                         # sexual abuse
+         H3MA1, H3MA2,                                  # physical neglect
+         H3ID26F
+         )
+```
+
+
+
+## Create w3 single race category variable
+```{r eval = F}
+w3 <- w3 %>%
+  mutate(
+    single_race_w3 = NA_real_,
+    single_race_w3 = case_when(
+      H3OD2 ==  1              ~ 0,         # hispanic/latine
+      H3OD4A == 1 & H3OD6 == 7 ~ 1,         # white
+      H3OD4B == 1 & H3OD6 == 7 ~ 2,         # black
+      H3OD4C == 1 & H3OD6 == 7 ~ 3,         # native american
+      H3OD4D == 1 & H3OD6 == 7 ~ 4,         # asian
+      H3OD6  != 7              ~ 5,         # multiracial
+      TRUE                     ~ NA_real_), # otherwise NA
+    single_race_w3 = factor(
+      single_race_w3,
+      levels = c(0:5),
+      labels = c(
+        "Hispanic/Latine",
+        "White alone",
+        "Black alone",
+        "Native American alone",
+        "Asian alone",
+        "Two or more races"
+        )
+      )
+  )
+```
+
+## Create w3 multiracial background variable
+```{r}
+w3 <- w3 %>% 
+  unite(multi_w3, H3OD4A:H3OD4D, sep = "", remove = F) 
+```
+
+## Create physical abuse ACE
+```{r}
+w3 <- w3 %>% 
+  mutate(
+    ace_phy_abu_w3 = NA_real_,
+    ace_phy_abu_w3 = case_when(
+      H3MA3 %in% c(1,2,3,4,5) ~ 1,
+      H3MA3 == 6              ~ 0,
+      TRUE                    ~ NA_real_
+    ), 
+    ace_phy_abu_w3 = factor(
+      ace_phy_abu_w3,
+      levels = c(0,1),
+      labels = c("Did not experience physical abuse",
+                 "Experienced physical abuse" 
+                 )
+    )
+  )
+```
+
+## Create sexual abuse ACE
+```{r}
+w3 <- w3 %>% 
+  mutate(
+    ace_sex_abu_w3 = NA_real_,
+    ace_sex_abu_w3 = case_when(
+      H3MA4 %in% c(1,2,3,4,5) ~ 1,
+      H3MA4 == 6              ~ 0,
+      TRUE                    ~ NA_real_
+    ),
+    ace_sex_abu_w3 = factor(
+      ace_sex_abu_w3,
+      levels = c(0,1),
+      labels = c("Did not experience sexual abuse",
+                 "Experienced sexual abuse" 
+                 )
+    )
+  )
+```
+
+## Create physical neglect ACE
+```{r}
+w3 <- w3 %>% 
+  mutate(
+    ace_phy_neg_w3 = NA_real_,
+    ace_phy_neg_w3 = case_when(
+      H3MA1 %in% c(1,2,3,4,5) | H3MA2 %in% c(1,2,3,4,5) ~ 1,
+      H3MA1 == 6 | H3MA2 == 6                           ~ 0,
+      TRUE                    ~ NA_real_
+    ),
+    ace_phy_neg_w3 = factor(
+      ace_phy_neg_w3,
+      levels = c(0,1),
+      labels = c("Did not experience physical neglect",
+                 "Experienced physical neglect" 
+                 )
+    )
+  )
+```
+
+## Recode taking medication for depression variable
+```{r}
+w3 <- w3 %>% 
+  mutate(H3ID26F = na_if(H3ID26F, 7),
+         H3ID26F = na_if(H3ID26F, 8)) 
+```
+
+## Remove unnecessary variables
+```{r}
+w3 <- w3 %>% 
+  select(!c(H3MA3, H3MA4, H3MA1, H3MA2))
+```
+
+## Create unweighted Table 1 (as a test) 
+```{r}
+# label all variables 
+table1::label(w3$single_race_w3) <- "Race"
+table1::label(w3$ace_phy_abu_w3) <- "ACE: Physical abuse"
+table1::label(w3$ace_sex_abu_w3) <- "ACE: Sexual abuse"
+table1::label(w3$ace_phy_neg_w3) <- "ACE: Physical neglect"
+
+# create table 1
+table1(~ single_race_w3 + 
+         ace_phy_abu_w3 + 
+         ace_sex_abu_w3 + 
+         ace_phy_neg_w3, 
+       data = w3
+       )
+```
+
+
+# write out csv
+```{r}
+write.csv(w3, "w3.csv")
+```
+
+
+
+
+
+### APPENDIX ###
+## Remove self-identified Latine participants
+
+w3 <- w3 %>% 
+  filter(H3OD2 != 1)
+
+
+# create w3 misclassification variable
+w3 <- w3 %>%
+  mutate(
+    mis_w3 = NA_real_,
+    mis_w3 = case_when(
+      # start with monoracial people
+      H3OD4A == 1 &
+        H3OD6 == 7 & H3IR4 == 1 |      # white
+        H3OD4B == 1 &
+        H3OD6 == 7 & H3IR4 == 2 |      # black
+        H3OD4C == 1 &
+        H3OD6 == 7 & H3IR4 == 3 |      # native american
+        H3OD4D == 1 &
+        H3OD6 == 7 & H3IR4 == 4 |      # asian
+        H1GI6E == 1 &
+        H3OD6 == 7 & H3IR4 == 5   ~ 0, # other
+      H3OD6 != 7 &
+        H1GI9 == 5 ~ 0,                # multiracials coded as "other"
+      H1GI9 == 6 |
+        H1GI9 == 8 ~ NA_real_,
+      # 6, 8 -> NA
+      TRUE ~ 1                         # otherwise misclassified
+    )
+  )
+
+
+       
+

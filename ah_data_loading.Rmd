@@ -1,0 +1,80 @@
+---
+title: "Add Health Data Loading"
+author: "Tracy Lam-Hine"
+date: "12/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load packages
+```{r}
+library(foreign)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(table1)
+library(tableone)
+library(visdat)
+library(naniar)
+library(ggplot2)
+library(lme4)
+library(survey)
+```
+
+## Set working directory
+```{r}
+setwd("C:/Users/lamhine/Desktop")
+```
+
+## Read in data files
+```{r}
+
+# wave 1
+wave1 <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave I/Wave I In Home Interview Data/allwave1.xpt"
+  )
+w1ctx <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Contextual Files/Wave I Contextual Data/Context1.xpt"
+  )
+
+
+# wave 3
+wave3 <- 
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave III/Wave III In Home Interview Data/wave3/wave3.xpt"
+    )
+
+# wave 4
+wave4 <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave IV/Wave IV In Home Interview Data/wave4/wave4.xpt"
+  )
+
+
+# biomarker data
+glu_a1c <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Wave IV Biomarker Files/Wave IV Glucose/glu_a1c.xpt"
+  )
+lipids <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Wave IV Biomarker Files/Wave IV Lipids/lipids.xpt"
+  )
+w4meds <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Wave IV Biomarker Files/Wave IV Medication File/w4meds.xpt"
+  )
+
+
+# weights
+w4wts <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave IV/Wave IV Grand Sample Weights/weights4/weights4.xpt"
+  )
+```

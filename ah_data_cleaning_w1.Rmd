@@ -1,0 +1,624 @@
+---
+title: "Add Health Wave 1 Data Cleaning"
+author: "Tracy Lam-Hine"
+date: "12/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Load packages
+```{r eval = F}
+   library(foreign)
+   library(dplyr)
+   library(tidyr)
+   library(stringr)
+   library(table1)
+   library(tableone)
+   library(visdat)
+   library(naniar)
+   library(ggplot2)
+   library(lme4)
+```
+
+## Set working directory
+```{r eval = F}
+setwd("C:/Users/lamhine/Desktop")
+```
+
+## Read in data files
+```{r eval = F}
+
+# wave 1
+wave1 <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave I/Wave I In Home Interview Data/allwave1.xpt"
+  )
+w1ctx <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Contextual Files/Wave I Contextual Data/Context1.xpt"
+  )
+
+# weights
+w1wts <-
+  read.xport(
+    "C:/Users/lamhine/Desktop/AddHealth/Core Files - Wave I/Wave I In-Home Weights/Homewt1.xpt"
+  )
+```
+
+## Pull necessary variables from wave 1 data
+```{r}
+w1 <- wave1 %>% 
+  select(AID, H1GI1M, H1GI1Y,               # id/bday/age/sex
+         H1GI4, H1GI6A, H1GI6B, H1GI6C,     # race/eth variables
+         H1GI6D, H1GI6E, H1GI8, H1GI9,      # race/eth variables
+         H1RM3, H1RF3,
+         H1PL2, H1RM1, H1RF1,               # parent education
+         # PA4, PA6_1, PA6_2, PA6_3, PA6_4, PA6_5, PA8B,  # parent race variables unusable
+         H1PF1, H1PF4, H1PF5, H1NM14, H1WP10,       # parental support (maternal)
+         H1PF23, H1PF24, H1PF25, H1NF14, H1WP14,    # parental support (paternal)
+         H1PR8,                             # emotional neglect
+         PA12,                              # parent education
+         PA38:PA54,                         # parent marriage 
+         PB20,                              # mother treated violently
+         PC49E_2, PC49E_3, H1TO52,          # substance abuse in household
+         PA20, PB16, H1SU6,                 # mental illness in household
+         PA55, S27)                         # household income & size
+```
+  
+## Create w1 single race category variable
+```{r eval = F}
+w1 <- w1 %>%
+  mutate(
+    single_race_w1 = NA_real_,
+    single_race_w1 = case_when(
+      H1GI4 ==  1              ~ 0,         # hispanic/latine
+      H1GI6A == 1 & H1GI8 == 7 ~ 1,         # white
+      H1GI6B == 1 & H1GI8 == 7 ~ 2,         # black
+      H1GI6C == 1 & H1GI8 == 7 ~ 3,         # native american
+      H1GI6D == 1 & H1GI8 == 7 ~ 4,         # asian
+      H1GI6E == 1 & H1GI8 == 7 ~ 5,         # other
+      H1GI8  != 7              ~ 6,         # multiracial
+      TRUE                     ~ NA_real_), # otherwise NA
+    single_race_w1 = factor(
+      single_race_w1,
+      levels = c(0:6),
+      labels = c(
+        "Hispanic/Latine",
+        "White alone",
+        "Black alone",
+        "Native American alone",
+        "Asian alone",
+        "Other alone",
+        "Two or more races"
+        )
+      )
+  )
+```
+
+## Create w1 multiracial background variable
+```{r}
+w1 <- w1 %>% 
+  unite(multi_w1, H1GI6A:H1GI6E, sep = "", remove = F) 
+```
+
+## Create w1 racial misclassification variable
+```{r}
+w1 <- w1 %>%
+  mutate(
+    mis_w1 = NA_real_,
+    mis_w1 = case_when(
+      H1GI4 == 1                                 ~ NA_real_, # hisp --> NA
+      H1GI6A == 1 & H1GI8 == 7 & H1GI9 == 1 |                # white
+        H1GI6B == 1 & H1GI8 == 7 & H1GI9 == 2 |              # black
+        H1GI6C == 1 & H1GI8 == 7 & H1GI9 == 3 |              # native american
+        H1GI6D == 1 & H1GI8 == 7 & H1GI9 == 4 |              # asian
+        H1GI6E == 1 & H1GI8 == 7 & H1GI9 == 5    ~ 0,        # other
+      H1GI8 != 7 &  H1GI9 == 5                   ~ 0,        # multiracials coded as "other"
+      H1GI9 == 6 |  H1GI9 == 8                   ~ NA_real_, # 6, 8 -> NA
+      TRUE                                       ~ 1),       # otherwise misclassified
+    mis_w1 = factor(
+      mis_w1,
+      levels = c(0,1),
+      labels = c(
+        "Not misclassified",
+        "Misclassified"
+      )
+    )
+  )
+
+   # note that in this coding scheme there are 8 people with missing exposure
+   # need to decide what to do with these missing exposures
+
+#w1 <- w1 %>% select(!H1GI4:H1GI9)
+
+```
+
+
+## Create recategorized parental education vars
+```{r}
+w1 <- w1 %>%
+  mutate(
+    mat_edu_w1 = NA_real_,
+    mat_edu_w1 = case_when(          # child reporting on mom
+      H1RM1 %in% c(10, 1, 2, 3, 5) ~ 1,   # 1=<HS, voc, or GED
+      H1RM1 %in% c(4, 6) ~ 2,             # 2=HS grad
+      H1RM1 %in% c(7, 3) ~ 3,             # 3=some college
+      H1RM1 %in% c(8, 9) ~ 4,             # 4=college grad or higher
+      TRUE ~ mat_edu_w1
+    ),                                    # 11, 12, 96-98 -> NA
+    pat_edu_w1 = NA_real_,
+    pat_edu_w1 = case_when(          # child reporting on dad
+      H1RF1 %in% c(10, 1, 2, 3, 5) ~ 1,   # same coding as above
+      H1RF1 %in% c(4, 6) ~ 2,
+      H1RF1 %in% c(7, 3) ~ 3,
+      H1RF1 %in% c(8, 9) ~ 4,
+      TRUE ~ pat_edu_w1
+    ),
+    par_edu_w1 = NA_real_,
+    par_edu_w1 = case_when(          # parent self report
+      PA12 %in% c(10, 1, 2, 3, 5) ~ 1,    # same coding as above
+      PA12 %in% c(4, 6) ~ 2,
+      PA12 %in% c(7, 3) ~ 3,
+      PA12 %in% c(8, 9) ~ 4,
+      TRUE ~ par_edu_w1
+    )
+  )
+
+# create summary parental education var
+w1 <- w1 %>% mutate(
+  max_par_edu_w1 = pmax(
+    mat_edu_w1,
+    pat_edu_w1,
+    par_edu_w1,
+    na.rm = T),
+  max_par_edu_w1 = factor(
+    max_par_edu_w1,
+    levels = c(1, 2, 3, 4),
+    labels = c("Less than high school, completed vocational school, or GED",
+               "High school diploma",
+               "Some college",
+               "College graduate or greater")
+  )
+  )
+
+w1 <- w1 %>% select(!H1PL2:H1RF1) %>% select(!mat_edu_w1:par_edu_w1)
+```
+
+## Create family size adjusted income variable
+```{r}
+w1 <- w1 %>% 
+  mutate(
+    fam_inc_w1 = NA_real_,
+    fam_inc_w1 = case_when(
+      is.na(PA55) | is.na(S27)              ~ NA_real_,
+      PA55 %in% c(9996) | S27 %in% c(7, 99) ~ NA_real_,
+      TRUE                                  ~ PA55 / S27
+    )
+  )
+
+w1 <- w1 %>% 
+  select(!PA55:S27)
+```
+
+## Create parental support variable
+```{r}
+# recode component variables
+w1 <- w1 %>% 
+  mutate(
+    across(H1PF1:H1WP14, ~ na_if(., 6)),
+    across(H1PF1:H1WP14, ~ na_if(., 7)),
+    across(H1PF1:H1WP14, ~ na_if(., 8)),    
+    across(H1PF1:H1WP14, ~ na_if(., 9))
+  )
+
+# create summary (averaged) score, reversed so 5 = high support, 1 = low 
+# drop previously recoded vars
+w1 <- w1 %>% 
+  mutate(
+    mat_sup_w1 = 6 - rowMeans(select(.,H1PF1:H1WP10), na.rm = T),
+    pat_sup_w1 = 6 - rowMeans(select(.,H1PF23:H1WP14), na.rm = T)
+  )
+w1 <- w1 %>% 
+  mutate(
+    par_sup_w1 = NA_real_,
+    par_sup_w1 = rowMeans(select(.,mat_sup_w1:pat_sup_w1), na.rm = T)
+    )
+
+w1 <- w1 %>% 
+  select(!c(H1PF1:H1WP14, mat_sup_w1:pat_sup_w1))
+```
+       
+## Create divorce ACE variable
+```{r}
+# create age variables for divorce 
+w1 <- w1 %>% 
+  mutate(
+    age_int_w1 = NA_real_,
+    age_int_w1 = case_when(
+      H1GI1Y == 96                  ~ NA_real_,
+      TRUE                          ~ 95 - H1GI1Y),
+    age_18 = NA_real_,
+    age_18 = case_when(
+      H1GI1Y == 96                  ~ NA_real_,
+      TRUE                          ~ 18 + H1GI1Y)
+    )
+        
+# create divorce indicator variables
+w1 <- w1 %>%
+  mutate(
+    across(PA41_1:PA54, ~ na_if(., 6)),
+    # replace 6 with NA
+    r1_div = NA_real_,
+    r1_div = case_when(
+      PA42 %in% c(1, 2) & PA43 == 0 & PA44 %in% c(1, 2, 3) ~ 1, # divorced, separated, or annulled
+      PA43 == 1                                            ~ 0, # still together
+      PA44 %in% c(4, 5)                                    ~ 0, # death or other
+      PA43 == 7                                            ~ 7, # true skip
+      TRUE                                                 ~ NA_real_
+    ),
+    r2_div = NA_real_,
+    r2_div = case_when(
+      PA47 %in% c(1, 2) & PA48 == 0 & PA49 %in% c(1, 2, 3) ~ 1,
+      PA48 == 1                                            ~ 0,
+      PA49 %in% c(4, 5)                                    ~ 0,
+      PA48 == 7                                            ~ 7,
+      TRUE                                                 ~ NA_real_
+    ),
+    r3_div = NA_real_,
+    r3_div = case_when(
+      PA52 %in% c(1, 2) & PA53 == 0 & PA54 %in% c(1, 2, 3) ~ 1,
+      PA53 == 1                                            ~ 0,
+      PA44 %in% c(4, 5)                                    ~ 0,
+      PA53 == 7                                            ~ 7,
+      TRUE                                                 ~ NA_real_
+    )
+  )
+        
+# create relationship end year variables
+w1 <- w1 %>%
+  mutate(
+    r1_endyr = NA_real_,
+    r1_endyr = case_when(
+      PA41_19 - PA41_18 == 1         ~ 78, # ended in 78
+      PA41_18 - PA41_17 == 1         ~ 79, # ended in 79
+      PA41_17 - PA41_16 == 1         ~ 80, # ended in 80
+      PA41_16 - PA41_15 == 1         ~ 81, # ended in 81
+      PA41_15 - PA41_14 == 1         ~ 82, # ended in 82
+      PA41_14 - PA41_13 == 1         ~ 83, # ended in 83
+      PA41_13 - PA41_12 == 1         ~ 84, # ended in 84
+      PA41_12 - PA41_11 == 1         ~ 85, # ended in 85
+      PA41_11 - PA41_10 == 1         ~ 86, # ended in 86
+      PA41_10 - PA41_9  == 1         ~ 87, # ended in 87
+      PA41_9  - PA41_8  == 1         ~ 88, # ended in 88
+      PA41_8  - PA41_7  == 1         ~ 89, # ended in 89
+      PA41_7  - PA41_6  == 1         ~ 90, # ended in 90
+      PA41_6  - PA41_5  == 1         ~ 91, # ended in 91
+      PA41_5  - PA41_4  == 1         ~ 92, # ended in 92
+      PA41_4  - PA41_3  == 1         ~ 93, # ended in 93
+      PA41_3  - PA41_2  == 1         ~ 94, # ended in 94
+      PA41_2  - PA41_1  == 1         ~ 95, # ended in 95
+      PA41_2 == 7 & PA41_1 == 7      ~ 7,  # true skip
+      PA41_2  - PA41_1  == 0         ~ 0,  # still together in 95
+      PA41_2  - PA41_1  == -1        ~ 0, # got together in 95
+      TRUE                           ~ NA_real_
+    ),
+    r2_endyr = NA_real_,
+    r2_endyr = case_when(
+      PA46_19 - PA46_18 == 1         ~ 78, # ended in 78
+      PA46_18 - PA46_17 == 1         ~ 79, # ended in 79
+      PA46_17 - PA46_16 == 1         ~ 80, # ended in 80
+      PA46_16 - PA46_15 == 1         ~ 81, # ended in 81
+      PA46_15 - PA46_14 == 1         ~ 82, # ended in 82
+      PA46_14 - PA46_13 == 1         ~ 83, # ended in 83
+      PA46_13 - PA46_12 == 1         ~ 84, # ended in 84
+      PA46_12 - PA46_11 == 1         ~ 85, # ended in 85
+      PA46_11 - PA46_10 == 1         ~ 86, # ended in 86
+      PA46_10 - PA46_9  == 1         ~ 87, # ended in 87
+      PA46_9  - PA46_8  == 1         ~ 88, # ended in 88
+      PA46_8  - PA46_7  == 1         ~ 89, # ended in 89
+      PA46_7  - PA46_6  == 1         ~ 90, # ended in 90
+      PA46_6  - PA46_5  == 1         ~ 91, # ended in 91
+      PA46_5  - PA46_4  == 1         ~ 92, # ended in 92
+      PA46_4  - PA46_3  == 1         ~ 93, # ended in 93
+      PA46_3  - PA46_2  == 1         ~ 94, # ended in 94
+      PA46_2  - PA46_1  == 1         ~ 95, # ended in 95
+      PA46_2 == 7 & PA46_1 == 7      ~ 7,  # true skip
+      PA46_2  - PA46_1  == 0         ~ 0,  # still together in 95
+      PA46_2  - PA46_1  == -1        ~ 0, # got together in 95
+      TRUE                           ~ NA_real_
+    ),
+    r3_endyr = NA_real_,
+    r3_endyr = case_when(
+      PA51_19 - PA51_18 == 1         ~ 78, # ended in 78
+      PA51_18 - PA51_17 == 1         ~ 79, # ended in 79
+      PA51_17 - PA51_16 == 1         ~ 80, # ended in 80
+      PA51_16 - PA51_15 == 1         ~ 81, # ended in 81
+      PA51_15 - PA51_14 == 1         ~ 82, # ended in 82
+      PA51_14 - PA51_13 == 1         ~ 83, # ended in 83
+      PA51_13 - PA51_12 == 1         ~ 84, # ended in 84
+      PA51_12 - PA51_11 == 1         ~ 85, # ended in 85
+      PA51_11 - PA51_10 == 1         ~ 86, # ended in 86
+      PA51_10 - PA51_9  == 1         ~ 87, # ended in 87
+      PA51_9  - PA51_8  == 1         ~ 88, # ended in 88
+      PA51_8  - PA51_7  == 1         ~ 89, # ended in 89
+      PA51_7  - PA51_6  == 1         ~ 90, # ended in 90
+      PA51_6  - PA51_5  == 1         ~ 91, # ended in 91
+      PA51_5  - PA51_4  == 1         ~ 92, # ended in 92
+      PA51_4  - PA51_3  == 1         ~ 93, # ended in 93
+      PA51_3  - PA51_2  == 1         ~ 94, # ended in 94
+      PA51_2  - PA51_1  == 1         ~ 95, # ended in 95
+      PA51_2 == 7 & PA51_1 == 7      ~ 7,  # true skip
+      PA51_2  - PA51_1  == 0         ~ 0,  # still together in 95
+      PA51_2  - PA51_1  == -1        ~ 0, # got together in 95
+      TRUE                           ~ NA_real_
+    )
+  )
+
+# create divorce before age 18 variables
+w1 <- w1 %>%
+  mutate(
+    r1_divb418 = NA_real_,
+    r1_divb418 = case_when(
+      r1_div == 1 &
+        between(r1_endyr - H1GI1Y, 0, 18)               ~ 1, # divorce btw 0-18yo
+      r1_div == 1 & is.na(r1_endyr)                     ~ 1, # divorce but NA year
+      r1_div == 1 & between(r1_endyr - H1GI1Y,-10,-1)   ~ 0, # divorce before born
+      r1_div == 0                                       ~ 0, # no divorce
+      r1_div == 7                                       ~ 0, # true skips
+      TRUE                                              ~ NA_real_
+    ),
+    r2_divb418 = NA_real_,
+    r2_divb418 = case_when(
+      r2_div == 1 & between(r2_endyr - H1GI1Y, 0, 18)   ~ 1,
+      r2_div == 1 & is.na(r2_endyr)                     ~ 1,
+      r2_div == 1 & between(r2_endyr - H1GI1Y,-10,-1)   ~ 0,
+      r2_div == 0                                       ~ 0,
+      r2_div == 7                                       ~ 0,
+      TRUE                                              ~ NA_real_
+    ),
+    r3_divb418 = NA_real_,
+    r3_divb418 = case_when(
+      r3_div == 1 & between(r3_endyr - H1GI1Y, 0, 18)   ~ 1,
+      r3_div == 1 & is.na(r3_endyr)                     ~ 1,
+      r3_div == 1 & between(r3_endyr - H1GI1Y,-10,-1)   ~ 0,
+      r3_div == 0                                       ~ 0,
+      r3_div == 7                                       ~ 0,
+      TRUE                                              ~ NA_real_
+    )
+  )
+
+# create the divorce ACE variable
+w1 <- w1 %>%
+  mutate(
+    ace_div_w1 = NA_real_,
+    ace_div_w1 = case_when(
+      r1_divb418 == 1 |
+        r2_divb418 == 1 | r3_divb418 == 1 ~ 1,    #any divorce
+      r1_divb418 == 0 &
+        r2_divb418 == 0 & r3_divb418 == 0 ~ 0,    #all not divorce
+      TRUE                                ~ NA_real_
+    ),
+    ace_div_w1 = factor(
+      ace_div_w1,
+      levels = c(0,1),
+      labels = c("Parents did not divorce",
+                 "Parents divorced" 
+                 )
+    )
+  )
+
+# note that many participants were not 18 at interview
+# add health didn't ask any more questions about parental divorce in later waves
+# create indicator for participants who could have experienced parent divorce later
+
+w1 <- w1 %>% 
+  mutate(
+    div_fut_w1 = NA_real_,
+    div_fut_w1 = case_when(
+      age_int_w1 < 18 & ace_div_w1 == 0    ~ 1,
+      age_int_w1 < 18 & is.na(ace_div_w1)  ~ 1,
+      TRUE                                 ~ 0
+    ), 
+    div_fut_w1 = factor(
+      div_fut_w1,
+      levels = c(0,1),
+      labels = c("Older than 18 or divorce already observed",
+                 "Divorce not yet observed" 
+                 )
+      )
+  )
+
+# remove component columns; no longer needed
+w1 <- w1 %>% 
+  select(!H1GI1M:H1GI1Y) %>% 
+  select(!PA38:PA54) %>% 
+  select(!age_int_w1:r3_divb418)
+``` 
+
+## Create emotional neglect ACE
+```{r}
+# note: this variable was originally coded using H1PF1 & P1PF23, however
+# those are included in my measure of parental support
+# using HI1PR8 more closely matches original ACE language (family support)
+
+w1 <- w1 %>% 
+  mutate(
+    ace_emo_neg_w1 = NA_real_,
+    ace_emo_neg_w1 = case_when(
+      H1PR8 %in% c(1, 2, 3)  ~ 1,
+      H1PR8 %in% c(4, 5)     ~ 0,
+      TRUE                   ~ NA_real_
+      ),
+    ace_emo_neg_w1 = factor(
+      ace_emo_neg_w1,
+      levels = c(0,1),
+      labels = c("Did not experience emotional neglect",
+                 "Experienced emotional neglect"
+                 )
+    )
+  )
+```
+
+### Create mother treated violently ACE
+```{r}
+w1 <- w1 %>% 
+  mutate(
+    ace_mom_vio_w1 = NA_real_,
+    ace_mom_vio_w1 = case_when(
+      PB20 == 1          ~ 1,
+      PB20 %in% c(2,3,4) ~ 0,
+      PB20 == 6          ~ NA_real_,
+      TRUE               ~ PB20
+    ),
+    ace_mom_vio_w1 = factor(
+      ace_mom_vio_w1,
+      levels = c(0,1),
+      labels = c("Mother not treated violently",
+                 "Mother treated violently"
+                 )
+    )
+  )
+```
+
+
+## Create substance abuse in household ACE
+```{r}
+w1 <- w1 %>% 
+  mutate(
+    ace_sub_abu_w1 = NA_real_,
+    ace_sub_abu_w1 = case_when(
+      PC49E_2 == 1 | PC49E_3 == 1 | H1TO52 == 1 ~ 1,
+      PC49E_2 == 0 | PC49E_3 == 0 | H1TO52 == 0 ~ 0,
+      TRUE                                      ~ NA_real_
+    ),
+    ace_sub_abu_w1 = factor(
+      ace_sub_abu_w1,
+      levels = c(0,1),
+      labels = c("No substance abuse in household",
+                 "Substance abuse in household"
+                 )
+    )
+  )
+```
+
+## Create mental illness in household ACE
+```{r}
+w1 <- w1 %>% 
+  mutate(
+    ace_mnt_ill_w1 = NA_real_,
+    ace_mnt_ill_w1 = case_when(
+      PA20 == 0 | PB16 == 0 | H1SU6 == 1 ~ 1,
+      PA20 == 1 | PB16 == 1 | H1SU6 == 0 ~ 0,
+      TRUE                                      ~ NA_real_
+    ),
+    ace_mnt_ill_w1 = factor(
+      ace_mnt_ill_w1,
+      levels = c(0,1),
+      labels = c("No mental illness in household",
+                 "Mental illness in household"
+                 )
+    )
+  )
+```
+
+## Remove all other uncoded variables
+```{r}
+w1 <- w1 %>% select(!H1PR8:H1SU6)
+```
+
+## WAVE 1 CONTEXTUAL DATA
+```{r}   
+# pull necessary variables from wave 1 contextual data
+ctx <- w1ctx %>% select(AID,
+                        TST90626, # % fam with 1989 inc < FPL
+                        TST90580, # % hh with public assistance income
+                        TST90680, # % age 25+ with no HSD
+                        TST90754, # % unemployment rate
+                        TST90479) # % female headed hh
+
+# create neighborhood disadvantage construct (average)
+ctx <- ctx %>% 
+  mutate(
+    nei_dis_w1 = NA_real_,
+    nei_dis_w1 = (TST90626 + TST90580 + TST90680 + TST90754 + TST90479) / 5) %>% 
+  select(AID, nei_dis_w1)
+  
+```
+
+## Join with With w1 dataset
+```{r}
+w1 <- w1 %>% 
+  left_join(.,ctx, by = "AID")
+```
+       
+       
+## Create unweighted Table 1 (as a test) 
+```{r}
+# label all variables 
+table1::label(w1$H1GI4) <- "Hispanic/Latine"
+table1::label(w1$H1GI6A) <- "White"
+table1::label(w1$H1GI6B) <- "Black"
+table1::label(w1$H1GI6C) <- "American Indian/Native American"
+table1::label(w1$H1GI6D) <- "Asian"
+table1::label(w1$H1GI6E) <- "Other"
+table1::label(w1$single_race_w1) <- "Race"
+table1::label(w1$mis_w1) <- "Racially misclassified by interviewer"
+table1::label(w1$max_par_edu_w1) <- "Highest parental education attainment"
+table1::label(w1$fam_inc_w1) <- "Per capita family income"
+table1::label(w1$nei_dis_w1) <- "Neighborhood disadvantage"
+table1::label(w1$par_sup_w1) <- "Parental support"
+table1::label(w1$ace_div_w1) <- "ACE: Parental divorce"
+table1::label(w1$div_fut_w1) <- "Future parent divorce possible"
+table1::label(w1$ace_emo_neg_w1) <- "ACE: Emotional neglect"
+table1::label(w1$ace_mom_vio_w1) <- "ACE: Mother treated violently"
+table1::label(w1$ace_sub_abu_w1) <- "ACE: Household substance abuse"
+table1::label(w1$ace_mnt_ill_w1) <- "ACE: Household mental illness"
+units(w1$fam_inc_w1) <- "in 1,000 USD"
+units(w1$nei_dis_w1) <- "scale from 0 to 1"
+units(w1$par_sup_w1) <- "scale from 1 to 5"
+
+# create table 1
+table1(~ single_race_w1 + 
+         mis_w1 + 
+         max_par_edu_w1 + 
+         fam_inc_w1 +
+         nei_dis_w1 +
+         par_sup_w1 + 
+         ace_div_w1 +
+         div_fut_w1 + 
+         ace_emo_neg_w1 +
+         ace_mom_vio_w1 + 
+         ace_sub_abu_w1 + 
+         ace_mnt_ill_w1 +
+         nei_dis_w1,
+       data = w1 
+       )
+```
+
+# write out csv
+```{r}
+write.csv(w1, "w1.csv")
+```
+
+
+### APPENDIX ###
+
+# create self-identified multiracial variables two ways to check
+w1 <- w1 %>%
+  mutate(
+    self_multi = NA_real_,
+    self_multi = case_when(
+      (H1GI6A + H1GI6B + H1GI6C + H1GI6D + H1GI6E)/5 > 0.2 & 
+        (H1GI6A + H1GI6B + H1GI6C + H1GI6D + H1GI6E)/5 <= 1  ~ 1,
+      TRUE ~ 0
+      ),
+    self_multi = factor(
+      self_multi,
+      levels = c(1,0),
+      labels = c("Multiracial", "Not multiracial")
+    )
+  )
