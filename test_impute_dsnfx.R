@@ -1,3 +1,6 @@
+# This test script uses the built-in api data from the survey package to create a reprex for multiple imputation with 
+# complex survey design effects. This workflow relies on the survey, mi, and mitools packages. 
+
 # load packages
 library(tidyverse)
 library(survey)
