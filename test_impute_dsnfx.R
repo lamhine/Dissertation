@@ -8,6 +8,8 @@ library(mi)
 library(mitools)
 
 # define function to tidy up MIresults
+# thank you to https://github.com/vincentarelbundock for providing this code
+# https://github.com/vincentarelbundock/modelsummary/issues/499#issuecomment-1153317898
 tidy.MIresult <- function(x, ...) {
   nil <- utils::capture.output(out <- summary(x, ...))
   out <- out %>%
