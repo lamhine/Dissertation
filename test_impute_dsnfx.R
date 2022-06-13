@@ -49,7 +49,7 @@ dsn <- svydesign(id = ~dnum,
                  data = imputationList(imp_list), 
                  fpc = ~fpc)
 
-# subset the survey design to remove schools that did not meet both targets
+# subset the survey design to remove schools that did not meet both targets (just as an example of subsetting)
 dsn_sub <- subset(dsn, both == "No")
 
 # specify analytic model  
